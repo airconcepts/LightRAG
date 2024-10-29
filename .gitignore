@@ -5,3 +5,6 @@ book.txt
 lightrag-dev/
 .idea/
 dist/
+.venv
+knowledge_graph.html
+.env

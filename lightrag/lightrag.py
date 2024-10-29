@@ -11,6 +11,7 @@ from .llm import (
 )
 from .operate import (
     chunking_by_token_size,
+    chunking_by_topic,
     extract_entities,
     local_query,
     global_query,
@@ -184,13 +185,14 @@ class LightRAG:
                         **dp,
                         "full_doc_id": doc_key,
                     }
-                    for dp in chunking_by_token_size(
+                    for dp in chunking_by_topic(
                         doc["content"],
-                        overlap_token_size=self.chunk_overlap_token_size,
-                        max_token_size=self.chunk_token_size,
+                        # overlap_token_size=self.chunk_overlap_token_size,
+                        # max_token_size=self.chunk_token_size,
                         tiktoken_model=self.tiktoken_model_name,
                     )
                 }
+                logger.info(f"[New Chunks] inserting {len(chunks)} chunks")
                 inserting_chunks.update(chunks)
             _add_chunk_keys = await self.text_chunks.filter_keys(
                 list(inserting_chunks.keys())
