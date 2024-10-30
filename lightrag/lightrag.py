@@ -11,7 +11,7 @@ from .llm import (
 )
 from .operate import (
     chunking_by_token_size,
-    chunking_by_topic,
+    chunking_markdown,
     extract_entities,
     local_query,
     global_query,
@@ -185,7 +185,7 @@ class LightRAG:
                         **dp,
                         "full_doc_id": doc_key,
                     }
-                    for dp in chunking_by_topic(
+                    for dp in chunking_markdown(
                         doc["content"],
                         # overlap_token_size=self.chunk_overlap_token_size,
                         # max_token_size=self.chunk_token_size,

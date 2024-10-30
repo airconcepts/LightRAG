@@ -4,15 +4,14 @@ import re
 from typing import Union
 from collections import Counter, defaultdict
 import warnings
-from llama_index.core.node_parser import SemanticSplitterNodeParser, MarkdownElementNodeParser
-from llama_index.core.node_parser.text.utils import split_by_phrase_regex, split_by_regex
-from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.core.node_parser.interface import Document
-from llama_index.node_parser.topic import TopicNodeParser
 from llama_index.llms.openai import OpenAI
+from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.core.settings import Settings
+from lightrag.node_parser.markdown_element import AirMarkdownElementNodeParser
 
 Settings.llm = OpenAI(model='gpt-4o-mini')
+Settings.embedding_model = OpenAIEmbedding(model='text-embedding-3-small')
 from .utils import (
     logger,
     clean_str,
@@ -35,31 +34,23 @@ from .base import (
 from .prompt import GRAPH_FIELD_SEP, PROMPTS
 
 
-def markdown_splitter(text: str):
-    node_parser = MarkdownElementNodeParser.from_defaults()
-    nodes = node_parser.get_nodes_from_documents([Document(text=text)])
-    return [node.get_content() for node in nodes]
-
-
-def chunking_by_topic(
+def chunking_markdown(
     content: str,
     tiktoken_model="gpt-4o"
 ):
-    embed_model = OpenAIEmbedding(model="text-embedding-3-small")
-    node_parser = SemanticSplitterNodeParser.from_defaults(
-        buffer_size=2,
-        sentence_splitter=markdown_splitter,
-        embed_model=embed_model
-    )
+    node_parser = AirMarkdownElementNodeParser.from_defaults()
     nodes = node_parser.get_nodes_from_documents([Document(text=content)])
+    
     results = []
     for index, node in enumerate(nodes):
-        logger.info("-"*10)
-        logger.info(node.get_content())
-        logger.info("-"*10)
+        title_hierarchy = node.metadata.get("title_hierarchy", [])
+        node_content = f"""
+breadcrumbs: {"->".join(title_hierarchy)}
+{node.get_content()}
+"""
         results.append(dict(
-            tokens=len(encode_string_by_tiktoken(node.get_content(), model_name=tiktoken_model)),
-            content=node.get_content(),
+            tokens=len(encode_string_by_tiktoken(node_content, model_name=tiktoken_model)),
+            content=node_content,
             chunk_order_index=index,
         ))
     return results
@@ -107,7 +98,6 @@ async def _handle_entity_relation_summary(
         description_list=use_description.split(GRAPH_FIELD_SEP),
     )
     use_prompt = prompt_template.format(**context_base)
-    logger.debug(f"Trigger summary: {entity_or_relation_name}")
     summary = await use_llm_func(use_prompt, max_tokens=summary_max_tokens)
     return summary
 

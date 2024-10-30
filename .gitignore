@@ -8,3 +8,4 @@ dist/
 .venv
 knowledge_graph.html
 .env
+notebooks/lib/

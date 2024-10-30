@@ -1,7 +1,6 @@
 from typing import Any, Callable, List, Optional, cast, Sequence, Tuple, Dict
 import uuid
 from llama_index.core.node_parser.relational.base_element import (
-    BaseElementNodeParser,
     Element,
 )
 from llama_index.core.node_parser.relational.markdown_element import MarkdownElementNodeParser
@@ -9,7 +8,14 @@ from llama_index.core.schema import BaseNode, TextNode, NodeRelationship, Metada
 from llama_index.core.node_parser.relational.utils import md_to_df
 from llama_index.core.node_parser.relational.base_element import TableOutput
 from lightrag.utils import logger
+from llama_index.embeddings.openai import OpenAIEmbedding
+import re
+from llama_index.core.settings import Settings
 BUFFER_SIZE = 2
+
+def regex_splitter(text: str):
+    return re.split(r'(?<!\n)\n(?!\n)', text)
+
 class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
     """Markdown element node parser.
 
@@ -31,34 +37,33 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                 "pandas is required for this function. Please install it with `pip install pandas`."
             )
 
-        from llama_index.core.node_parser import SentenceSplitter
+        from llama_index.core.node_parser import SemanticSplitterNodeParser
 
-        node_parser = self.nested_node_parser or SentenceSplitter()
+        node_parser = self.nested_node_parser or SemanticSplitterNodeParser.from_defaults(
+          sentence_splitter=regex_splitter
+        )
 
         nodes: List[BaseNode] = []
         cur_text_el_buffer: List[str] = []
         current_titles: Dict[int, str] = {}  # level -> title text
         for element in elements:
             title_hierarchy = [title for _, title in sorted(current_titles.items())]
-            if element.type == "title":
+            if element.title_level is not None:
                 level = element.title_level
                 # Clear any lower-level titles when we encounter a higher-level one
                 current_titles = {k: v for k, v in current_titles.items() if k < level}
                 current_titles[level] = element.element.strip()
-                node  = TextNode(
-                    text=element.element,
-                    metadata={"title_hierarchy": current_titles},
-                )
-            elif element.type == "table" or element.type == "table_text":
+            if element.type == "table" or element.type == "table_text":
                 # flush text buffer for table
-               
                 if len(cur_text_el_buffer) > 0:
+                    logger.info(f"cur_text_el_buffer: {cur_text_el_buffer}")
                     cur_text_nodes = self._get_nodes_from_buffer(
                         cur_text_el_buffer, node_parser
                     )
                     for node in cur_text_nodes:
                         node.metadata["title_hierarchy"] = title_hierarchy
                     nodes.extend(cur_text_nodes)
+                    logger.info(f"cur_text_nodes:\n {'\n'.join([node.get_content() for node in cur_text_nodes])}")
                     cur_text_el_buffer = []
 
                 table_output = cast(TableOutput, element.table_output)
@@ -113,17 +118,17 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
 
                 # shared index_id and node_id
                 node_id = str(uuid.uuid4())
-                index_node = IndexNode(
-                    text=table_summary,
-                    metadata={
-                        "col_schema": col_schema,
-                        "title_hierarchy": title_hierarchy,
-                    },
-                    excluded_embed_metadata_keys=["col_schema"],
-                    index_id=node_id,
-                    start_char_idx=start_char_idx,
-                    end_char_idx=end_char_idx,
-                )
+                # index_node = IndexNode(
+                #     text=table_summary,
+                #     metadata={
+                #         "col_schema": col_schema,
+                #         "title_hierarchy": title_hierarchy,
+                #     },
+                #     excluded_embed_metadata_keys=["col_schema"],
+                #     index_id=node_id,
+                #     start_char_idx=start_char_idx,
+                #     end_char_idx=end_char_idx,
+                # )
 
                 table_str = table_summary + "\n" + table_md
 
@@ -147,15 +152,18 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                     start_char_idx=start_char_idx,
                     end_char_idx=end_char_idx,
                 )
-                nodes.extend([index_node, text_node])
+                nodes.extend([text_node])
             else:
+                logger.info(f"append element: {element.element}")
                 cur_text_el_buffer.append(str(element.element))
 
         # flush text buffer for the last batch
         if len(cur_text_el_buffer) > 0:
+            logger.info(f"cur_text_el_buffer: {cur_text_el_buffer}")
             cur_text_nodes = self._get_nodes_from_buffer(
                 cur_text_el_buffer, node_parser
             )
+            logger.info(f"cur_text_nodes:\n {'\n'.join([node.get_content() for node in cur_text_nodes])}")
             nodes.extend(cur_text_nodes)
             cur_text_el_buffer = []
 
@@ -245,8 +253,8 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                     elements.append(currentElement)
                 currentElement = Element(
                     id=f"id_{len(elements)}",
-                    type="title",
-                    element=line.lstrip("#"),
+                    type="text",
+                    element=line,
                     title_level=len(line) - len(line.lstrip("#")),
                 )
             else:
