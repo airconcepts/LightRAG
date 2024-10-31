@@ -14,7 +14,7 @@ from llama_index.core.settings import Settings
 BUFFER_SIZE = 2
 
 def regex_splitter(text: str):
-    return re.split(r'(?<!\n)\n(?!\n)', text)
+    return text.split('\n')
 
 class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
     """Markdown element node parser.
@@ -40,7 +40,10 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
         from llama_index.core.node_parser import SemanticSplitterNodeParser
 
         node_parser = self.nested_node_parser or SemanticSplitterNodeParser.from_defaults(
-          sentence_splitter=regex_splitter
+          sentence_splitter=regex_splitter,
+          buffer_size=4,
+          include_prev_next_rel=True,
+          include_metadata=True,
         )
 
         nodes: List[BaseNode] = []
@@ -51,19 +54,18 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
             if element.title_level is not None:
                 level = element.title_level
                 # Clear any lower-level titles when we encounter a higher-level one
-                current_titles = {k: v for k, v in current_titles.items() if k < level}
+                current_titles = {k: v for k, v in current_titles.items() if k <= level}
                 current_titles[level] = element.element.strip()
+                title_hierarchy = [title for _, title in sorted(current_titles.items())]
             if element.type == "table" or element.type == "table_text":
                 # flush text buffer for table
                 if len(cur_text_el_buffer) > 0:
-                    logger.info(f"cur_text_el_buffer: {cur_text_el_buffer}")
                     cur_text_nodes = self._get_nodes_from_buffer(
                         cur_text_el_buffer, node_parser
                     )
                     for node in cur_text_nodes:
                         node.metadata["title_hierarchy"] = title_hierarchy
                     nodes.extend(cur_text_nodes)
-                    logger.info(f"cur_text_nodes:\n {'\n'.join([node.get_content() for node in cur_text_nodes])}")
                     cur_text_el_buffer = []
 
                 table_output = cast(TableOutput, element.table_output)
@@ -154,16 +156,13 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                 )
                 nodes.extend([text_node])
             else:
-                logger.info(f"append element: {element.element}")
                 cur_text_el_buffer.append(str(element.element))
 
         # flush text buffer for the last batch
         if len(cur_text_el_buffer) > 0:
-            logger.info(f"cur_text_el_buffer: {cur_text_el_buffer}")
             cur_text_nodes = self._get_nodes_from_buffer(
                 cur_text_el_buffer, node_parser
             )
-            logger.info(f"cur_text_nodes:\n {'\n'.join([node.get_content() for node in cur_text_nodes])}")
             nodes.extend(cur_text_nodes)
             cur_text_el_buffer = []
 
@@ -332,15 +331,16 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                 # )
 
         # merge consecutive text elements together for now
-        merged_elements: List[Element] = []
-        for element in elements:
-            if (
-                len(merged_elements) > 0
-                and element.type == "text"
-                and merged_elements[-1].type == "text"
-            ):
-                merged_elements[-1].element += "\n" + element.element
-            else:
-                merged_elements.append(element)
-        elements = merged_elements
-        return merged_elements
+        # merged_elements: List[Element] = []
+        # for element in elements:
+        #     if (
+        #         len(merged_elements) > 0
+        #         and element.type == "text"
+        #         and merged_elements[-1].type == "text"
+        #     ):
+        #         merged_elements[-1].element += "\n" + element.element
+        #     else:
+        #         merged_elements.append(element)
+        # elements = merged_elements
+        # return merged_elements
+        return elements

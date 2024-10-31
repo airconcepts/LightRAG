@@ -45,7 +45,7 @@ def chunking_markdown(
     for index, node in enumerate(nodes):
         title_hierarchy = node.metadata.get("title_hierarchy", [])
         node_content = f"""
-breadcrumbs: {"->".join(title_hierarchy)}
+Breadcrumb: {"->".join(title_hierarchy)}
 {node.get_content()}
 """
         results.append(dict(
