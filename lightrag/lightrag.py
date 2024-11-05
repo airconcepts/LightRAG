@@ -1,5 +1,6 @@
 import asyncio
 import os
+import importlib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
@@ -24,6 +25,18 @@ from .storage import (
     NanoVectorDBStorage,
     NetworkXStorage,
 )
+ 
+from .kg.neo4j_impl import (
+    Neo4JStorage 
+)
+#future KG integrations
+
+# from .kg.ArangoDB_impl import (
+#     GraphStorage as ArangoDBStorage
+# )
+
+
+
 from .utils import (
     EmbeddingFunc,
     compute_mdhash_id,
@@ -45,17 +58,26 @@ def always_get_an_event_loop() -> asyncio.AbstractEventLoop:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        logger.info("Creating a new event loop in a sub-thread.")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        logger.info("Creating a new event loop in main thread.")
+        # loop = asyncio.new_event_loop()
+        # asyncio.set_event_loop(loop)
+        loop = asyncio.get_event_loop()
     return loop
 
 
 @dataclass
 class LightRAG:
+    
     working_dir: str = field(
         default_factory=lambda: f"./lightrag_cache_{datetime.now().strftime('%Y-%m-%d-%H:%M:%S')}"
     )
+
+    kg: str = field(default="NetworkXStorage")
+
+    current_log_level = logger.level
+    log_level: str = field(default=current_log_level)
+
+
 
     # text chunking
     chunk_token_size: int = 1200
@@ -89,12 +111,12 @@ class LightRAG:
     llm_model_name: str = "meta-llama/Llama-3.2-1B-Instruct"  #'meta-llama/Llama-3.2-1B'#'google/gemma-2-2b-it'
     llm_model_max_token_size: int = 32768
     llm_model_max_async: int = 16
+    llm_model_kwargs: dict = field(default_factory=dict)
 
     # storage
     key_string_value_json_storage_cls: Type[BaseKVStorage] = JsonKVStorage
     vector_db_storage_cls: Type[BaseVectorStorage] = NanoVectorDBStorage
     vector_db_storage_cls_kwargs: dict = field(default_factory=dict)
-    graph_storage_cls: Type[BaseGraphStorage] = NetworkXStorage
     enable_llm_cache: bool = True
 
     # extension
@@ -104,10 +126,15 @@ class LightRAG:
     def __post_init__(self):
         log_file = os.path.join(self.working_dir, "lightrag.log")
         set_logger(log_file)
+        logger.setLevel(self.log_level)
+
         logger.info(f"Logger initialized for working directory: {self.working_dir}")
 
         _print_config = ",\n  ".join([f"{k} = {v}" for k, v in asdict(self).items()])
         logger.debug(f"LightRAG init with param:\n  {_print_config}\n")
+
+        #@TODO: should move all storage setup here to leverage initial start params attached to self.
+        self.graph_storage_cls: Type[BaseGraphStorage] = self._get_storage_class()[self.kg]
 
         if not os.path.exists(self.working_dir):
             logger.info(f"Creating working directory {self.working_dir}")
@@ -155,8 +182,18 @@ class LightRAG:
         )
 
         self.llm_model_func = limit_async_func_call(self.llm_model_max_async)(
-            partial(self.llm_model_func, hashing_kv=self.llm_response_cache)
+            partial(
+                self.llm_model_func,
+                hashing_kv=self.llm_response_cache,
+                **self.llm_model_kwargs,
+            )
         )
+    def _get_storage_class(self) -> Type[BaseGraphStorage]:
+        return {
+            "Neo4JStorage": Neo4JStorage,
+            "NetworkXStorage": NetworkXStorage,
+            # "ArangoDBStorage": ArangoDBStorage
+        }
 
     def insert(self, string_or_strings, entity_types: list[str] = None):
         loop = always_get_an_event_loop()
