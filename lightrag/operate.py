@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from typing import Union
+from typing import Union, TypedDict, List, Optional
 from collections import Counter, defaultdict
 import warnings
 from llama_index.core.node_parser.interface import Document
@@ -269,6 +269,7 @@ async def extract_entities(
     entity_vdb: BaseVectorStorage,
     relationships_vdb: BaseVectorStorage,
     global_config: dict,
+    entity_types: list[str] = None,
 ) -> Union[BaseGraphStorage, None]:
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
@@ -280,7 +281,7 @@ async def extract_entities(
         tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
         record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
         completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
-        entity_types=",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
+        entity_types=",".join(entity_types) if entity_types else ",".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
     )
     continue_prompt = PROMPTS["entiti_continue_extraction"]
     if_loop_prompt = PROMPTS["entiti_if_loop_extraction"]
@@ -415,6 +416,31 @@ async def extract_entities(
     return knowledge_graph_inst
 
 
+class EntityItem(TypedDict):
+    id: int
+    entity: str
+    type: str
+    description: str
+    rank: float
+
+class RelationItem(TypedDict):
+    id: int
+    source: str
+    target: str
+    description: str
+    keywords: str
+    weight: float
+    rank: float
+
+class TextUnitItem(TypedDict):
+    id: int
+    content: str
+
+class QueryResult(TypedDict):
+    relations: List[RelationItem]
+    entities: List[EntityItem]
+    text_units: List[TextUnitItem]
+
 async def local_query(
     query,
     knowledge_graph_inst: BaseGraphStorage,
@@ -423,7 +449,7 @@ async def local_query(
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
     global_config: dict,
-) -> str:
+) -> Optional[QueryResult]:
     context = None
     use_model_func = global_config["llm_model_func"]
 
@@ -460,30 +486,9 @@ async def local_query(
             text_chunks_db,
             query_param,
         )
-    if query_param.only_need_context:
         return context
-    if context is None:
-        return PROMPTS["fail_response"]
-    sys_prompt_temp = PROMPTS["rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
-    )
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-    )
-    if len(response) > len(sys_prompt):
-        response = (
-            response.replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
-        )
-
-    return response
+    else:
+        return None
 
 
 async def _build_local_query_context(
@@ -492,7 +497,7 @@ async def _build_local_query_context(
     entities_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
-):
+) -> Optional[QueryResult]:
     results = await entities_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
         return None
@@ -529,7 +534,7 @@ async def _build_local_query_context(
                 n["rank"],
             ]
         )
-    entities_context = list_of_list_to_csv(entites_section_list)
+    entities_dict = [dict(zip(entites_section_list[0], r)) for r in entites_section_list[1:]]
 
     relations_section_list = [
         ["id", "source", "target", "description", "keywords", "weight", "rank"]
@@ -546,26 +551,13 @@ async def _build_local_query_context(
                 e["rank"],
             ]
         )
-    relations_context = list_of_list_to_csv(relations_section_list)
+    relations_dict = [dict(zip(relations_section_list[0], r)) for r in relations_section_list[1:]]
 
     text_units_section_list = [["id", "content"]]
     for i, t in enumerate(use_text_units):
         text_units_section_list.append([i, t["content"]])
-    text_units_context = list_of_list_to_csv(text_units_section_list)
-    return f"""
------Entities-----
-```csv
-{entities_context}
-```
------Relationships-----
-```csv
-{relations_context}
-```
------Sources-----
-```csv
-{text_units_context}
-```
-"""
+    text_units_dict = [dict(zip(text_units_section_list[0], r)) for r in text_units_section_list[1:]]
+    return {"relations": relations_dict, "entities": entities_dict, "text_units": text_units_dict}
 
 
 async def _find_most_related_text_unit_from_entities(
@@ -671,7 +663,7 @@ async def global_query(
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
     global_config: dict,
-) -> str:
+) -> Optional[QueryResult]:
     context = None
     use_model_func = global_config["llm_model_func"]
 
@@ -710,33 +702,9 @@ async def global_query(
             text_chunks_db,
             query_param,
         )
-
-    if query_param.only_need_context:
         return context
-    if context is None:
-        return PROMPTS["fail_response"]
-
-    sys_prompt_temp = PROMPTS["rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
-    )
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-    )
-    if len(response) > len(sys_prompt):
-        response = (
-            response.replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
-        )
-
-    return response
-
+    else:
+        return None
 
 async def _build_global_query_context(
     keywords,
@@ -745,7 +713,7 @@ async def _build_global_query_context(
     relationships_vdb: BaseVectorStorage,
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
-):
+) -> Optional[QueryResult]:
     results = await relationships_vdb.query(keywords, top_k=query_param.top_k)
 
     if not len(results):
@@ -798,8 +766,7 @@ async def _build_global_query_context(
                 e["rank"],
             ]
         )
-    relations_context = list_of_list_to_csv(relations_section_list)
-
+    relations_dict = [dict(zip(relations_section_list[0], r)) for r in relations_section_list[1:]]
     entites_section_list = [["id", "entity", "type", "description", "rank"]]
     for i, n in enumerate(use_entities):
         entites_section_list.append(
@@ -811,28 +778,14 @@ async def _build_global_query_context(
                 n["rank"],
             ]
         )
-    entities_context = list_of_list_to_csv(entites_section_list)
-
+    entities_dict = [dict(zip(entites_section_list[0], r)) for r in entites_section_list[1:]]
     text_units_section_list = [["id", "content"]]
     for i, t in enumerate(use_text_units):
         text_units_section_list.append([i, t["content"]])
-    text_units_context = list_of_list_to_csv(text_units_section_list)
-
-    return f"""
------Entities-----
-```csv
-{entities_context}
-```
------Relationships-----
-```csv
-{relations_context}
-```
------Sources-----
-```csv
-{text_units_context}
-```
-"""
-
+        
+    text_units_dict = [dict(zip(text_units_section_list[0], r)) for r in text_units_section_list[1:]]
+    
+    return {"relations": relations_dict, "entities": entities_dict, "text_units": text_units_dict}
 
 async def _find_most_related_entities_from_relationships(
     edge_datas: list[dict],
@@ -910,7 +863,7 @@ async def hybrid_query(
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
     global_config: dict,
-) -> str:
+) -> Optional[QueryResult]:
     low_level_context = None
     high_level_context = None
     use_model_func = global_config["llm_model_func"]
@@ -964,104 +917,55 @@ async def hybrid_query(
             query_param,
         )
 
-    context = combine_contexts(high_level_context, low_level_context)
+    merged_relations = []
+    seen_relations = set()
+    for context in [low_level_context, high_level_context]:
+        if not context:
+            continue
+        for relation in context.get("relations", []):
+            # Create a unique key for the relation using source and target
+            relation_key = f"{relation['source']}-{relation['target']}"
+            if relation_key not in seen_relations:
+                seen_relations.add(relation_key)
+                merged_relations.append(relation)
 
-    if query_param.only_need_context:
-        return context
-    if context is None:
-        return PROMPTS["fail_response"]
+    merged_entities = []
+    seen_entities = set()
+    for context in [low_level_context, high_level_context]:
+        if not context:
+            continue
+        for entity in context.get("entities", []):
+            if entity['entity'] not in seen_entities:
+                seen_entities.add(entity['entity'])
+                merged_entities.append(entity)
 
-    sys_prompt_temp = PROMPTS["rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        context_data=context, response_type=query_param.response_type
-    )
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-    )
-    if len(response) > len(sys_prompt):
-        response = (
-            response.replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
-        )
-    return response
+    merged_text_units = []
+    seen_text_units = set()
+    for context in [low_level_context, high_level_context]:
+        if not context:
+            continue
+        for text_unit in context.get("text_units", []):
+            # Use the content as the unique key since it's the most reliable identifier
+            content_hash = hash(text_unit['content'])
+            if content_hash not in seen_text_units:
+                seen_text_units.add(content_hash)
+                merged_text_units.append(text_unit)
 
+    # Update IDs to ensure they're sequential after merging
+    for i, item in enumerate(merged_relations):
+        item['id'] = i
+    for i, item in enumerate(merged_entities):
+        item['id'] = i
+    for i, item in enumerate(merged_text_units):
+        item['id'] = i
 
-def combine_contexts(high_level_context, low_level_context):
-    # Function to extract entities, relationships, and sources from context strings
+    context = {
+        "relations": merged_relations,
+        "entities": merged_entities,
+        "text_units": merged_text_units
+    }
 
-    def extract_sections(context):
-        entities_match = re.search(
-            r"-----Entities-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
-        )
-        relationships_match = re.search(
-            r"-----Relationships-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
-        )
-        sources_match = re.search(
-            r"-----Sources-----\s*```csv\s*(.*?)\s*```", context, re.DOTALL
-        )
-
-        entities = entities_match.group(1) if entities_match else ""
-        relationships = relationships_match.group(1) if relationships_match else ""
-        sources = sources_match.group(1) if sources_match else ""
-
-        return entities, relationships, sources
-
-    # Extract sections from both contexts
-
-    if high_level_context is None:
-        warnings.warn(
-            "High Level context is None. Return empty High entity/relationship/source"
-        )
-        hl_entities, hl_relationships, hl_sources = "", "", ""
-    else:
-        hl_entities, hl_relationships, hl_sources = extract_sections(high_level_context)
-
-    if low_level_context is None:
-        warnings.warn(
-            "Low Level context is None. Return empty Low entity/relationship/source"
-        )
-        ll_entities, ll_relationships, ll_sources = "", "", ""
-    else:
-        ll_entities, ll_relationships, ll_sources = extract_sections(low_level_context)
-
-    # Combine and deduplicate the entities
-    combined_entities_set = set(
-        filter(None, hl_entities.strip().split("\n") + ll_entities.strip().split("\n"))
-    )
-    combined_entities = "\n".join(combined_entities_set)
-
-    # Combine and deduplicate the relationships
-    combined_relationships_set = set(
-        filter(
-            None,
-            hl_relationships.strip().split("\n") + ll_relationships.strip().split("\n"),
-        )
-    )
-    combined_relationships = "\n".join(combined_relationships_set)
-
-    # Combine and deduplicate the sources
-    combined_sources_set = set(
-        filter(None, hl_sources.strip().split("\n") + ll_sources.strip().split("\n"))
-    )
-    combined_sources = "\n".join(combined_sources_set)
-
-    # Format the combined context
-    return f"""
------Entities-----
-```csv
-{combined_entities}
------Relationships-----
-{combined_relationships}
------Sources-----
-{combined_sources}
-"""
-
+    return context
 
 async def naive_query(
     query,
@@ -1069,7 +973,7 @@ async def naive_query(
     text_chunks_db: BaseKVStorage[TextChunkSchema],
     query_param: QueryParam,
     global_config: dict,
-):
+) -> Optional[QueryResult]:
     use_model_func = global_config["llm_model_func"]
     results = await chunks_vdb.query(query, top_k=query_param.top_k)
     if not len(results):
@@ -1082,29 +986,6 @@ async def naive_query(
         key=lambda x: x["content"],
         max_token_size=query_param.max_token_for_text_unit,
     )
-    logger.info(f"Truncate {len(chunks)} to {len(maybe_trun_chunks)} chunks")
-    section = "--New Chunk--\n".join([c["content"] for c in maybe_trun_chunks])
-    if query_param.only_need_context:
-        return section
-    sys_prompt_temp = PROMPTS["naive_rag_response"]
-    sys_prompt = sys_prompt_temp.format(
-        content_data=section, response_type=query_param.response_type
-    )
-    response = await use_model_func(
-        query,
-        system_prompt=sys_prompt,
-    )
-
-    if len(response) > len(sys_prompt):
-        response = (
-            response[len(sys_prompt) :]
-            .replace(sys_prompt, "")
-            .replace("user", "")
-            .replace("model", "")
-            .replace(query, "")
-            .replace("<system>", "")
-            .replace("</system>", "")
-            .strip()
-        )
-
-    return response
+    return {
+        "text_units": [{"id": i, "content": c["content"]} for i, c in enumerate(maybe_trun_chunks)]
+    }

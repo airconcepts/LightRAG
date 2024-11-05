@@ -3,8 +3,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from typing import Type, cast
-
+from typing import Type, cast, Optional
+from .operate import QueryResult
 from .llm import (
     gpt_4o_mini_complete,
     openai_embedding,
@@ -158,11 +158,11 @@ class LightRAG:
             partial(self.llm_model_func, hashing_kv=self.llm_response_cache)
         )
 
-    def insert(self, string_or_strings):
+    def insert(self, string_or_strings, entity_types: list[str] = None):
         loop = always_get_an_event_loop()
-        return loop.run_until_complete(self.ainsert(string_or_strings))
+        return loop.run_until_complete(self.ainsert(string_or_strings, entity_types))
 
-    async def ainsert(self, string_or_strings):
+    async def ainsert(self, string_or_strings, entity_types: list[str] = None):
         try:
             if isinstance(string_or_strings, str):
                 string_or_strings = [string_or_strings]
@@ -214,6 +214,7 @@ class LightRAG:
                 entity_vdb=self.entities_vdb,
                 relationships_vdb=self.relationships_vdb,
                 global_config=asdict(self),
+                entity_types=entity_types,
             )
             if maybe_new_kg is None:
                 logger.warning("No new entities and relationships found")
@@ -241,11 +242,11 @@ class LightRAG:
             tasks.append(cast(StorageNameSpace, storage_inst).index_done_callback())
         await asyncio.gather(*tasks)
 
-    def query(self, query: str, param: QueryParam = QueryParam()):
+    def query(self, query: str, param: QueryParam = QueryParam()) -> Optional[QueryResult]:
         loop = always_get_an_event_loop()
         return loop.run_until_complete(self.aquery(query, param))
 
-    async def aquery(self, query: str, param: QueryParam = QueryParam()):
+    async def aquery(self, query: str, param: QueryParam = QueryParam()) -> Optional[QueryResult]:
         if param.mode == "local":
             response = await local_query(
                 query,
