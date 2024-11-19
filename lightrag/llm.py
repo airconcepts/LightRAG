@@ -1,11 +1,11 @@
 import os
 import copy
-from functools import lru_cache
+# from functools import lru_cache
 import json
 import aioboto3
 import aiohttp
 import numpy as np
-import ollama
+# import ollama
 
 from openai import (
     AsyncOpenAI,
@@ -25,7 +25,7 @@ from tenacity import (
     retry_if_exception_type,
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
+# import torch
 from pydantic import BaseModel, Field
 from typing import List, Dict, Callable, Any
 from .base import BaseKVStorage
@@ -215,244 +215,244 @@ async def bedrock_complete_if_cache(
         return response["output"]["message"]["content"][0]["text"]
 
 
-@lru_cache(maxsize=1)
-def initialize_hf_model(model_name):
-    hf_tokenizer = AutoTokenizer.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
-    )
-    hf_model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
-    )
-    if hf_tokenizer.pad_token is None:
-        hf_tokenizer.pad_token = hf_tokenizer.eos_token
+# @lru_cache(maxsize=1)
+# def initialize_hf_model(model_name):
+#     hf_tokenizer = AutoTokenizer.from_pretrained(
+#         model_name, device_map="auto", trust_remote_code=True
+#     )
+#     hf_model = AutoModelForCausalLM.from_pretrained(
+#         model_name, device_map="auto", trust_remote_code=True
+#     )
+#     if hf_tokenizer.pad_token is None:
+#         hf_tokenizer.pad_token = hf_tokenizer.eos_token
 
-    return hf_model, hf_tokenizer
-
-
-async def hf_model_if_cache(
-    model, prompt, system_prompt=None, history_messages=[], **kwargs
-) -> str:
-    model_name = model
-    hf_model, hf_tokenizer = initialize_hf_model(model_name)
-    hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.extend(history_messages)
-    messages.append({"role": "user", "content": prompt})
-
-    if hashing_kv is not None:
-        args_hash = compute_args_hash(model, messages)
-        if_cache_return = await hashing_kv.get_by_id(args_hash)
-        if if_cache_return is not None:
-            return if_cache_return["return"]
-    input_prompt = ""
-    try:
-        input_prompt = hf_tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-    except Exception:
-        try:
-            ori_message = copy.deepcopy(messages)
-            if messages[0]["role"] == "system":
-                messages[1]["content"] = (
-                    "<system>"
-                    + messages[0]["content"]
-                    + "</system>\n"
-                    + messages[1]["content"]
-                )
-                messages = messages[1:]
-                input_prompt = hf_tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
-        except Exception:
-            len_message = len(ori_message)
-            for msgid in range(len_message):
-                input_prompt = (
-                    input_prompt
-                    + "<"
-                    + ori_message[msgid]["role"]
-                    + ">"
-                    + ori_message[msgid]["content"]
-                    + "</"
-                    + ori_message[msgid]["role"]
-                    + ">\n"
-                )
-
-    input_ids = hf_tokenizer(
-        input_prompt, return_tensors="pt", padding=True, truncation=True
-    ).to("cuda")
-    inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
-    output = hf_model.generate(
-        **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
-    )
-    response_text = hf_tokenizer.decode(
-        output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
-    )
-    if hashing_kv is not None:
-        await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
-    return response_text
+#     return hf_model, hf_tokenizer
 
 
-async def ollama_model_if_cache(
-    model, prompt, system_prompt=None, history_messages=[], **kwargs
-) -> str:
-    kwargs.pop("max_tokens", None)
-    kwargs.pop("response_format", None)
-    host = kwargs.pop("host", None)
-    timeout = kwargs.pop("timeout", None)
+# async def hf_model_if_cache(
+#     model, prompt, system_prompt=None, history_messages=[], **kwargs
+# ) -> str:
+#     model_name = model
+#     hf_model, hf_tokenizer = initialize_hf_model(model_name)
+#     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+#     messages = []
+#     if system_prompt:
+#         messages.append({"role": "system", "content": system_prompt})
+#     messages.extend(history_messages)
+#     messages.append({"role": "user", "content": prompt})
 
-    ollama_client = ollama.AsyncClient(host=host, timeout=timeout)
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+#     if hashing_kv is not None:
+#         args_hash = compute_args_hash(model, messages)
+#         if_cache_return = await hashing_kv.get_by_id(args_hash)
+#         if if_cache_return is not None:
+#             return if_cache_return["return"]
+#     input_prompt = ""
+#     try:
+#         input_prompt = hf_tokenizer.apply_chat_template(
+#             messages, tokenize=False, add_generation_prompt=True
+#         )
+#     except Exception:
+#         try:
+#             ori_message = copy.deepcopy(messages)
+#             if messages[0]["role"] == "system":
+#                 messages[1]["content"] = (
+#                     "<system>"
+#                     + messages[0]["content"]
+#                     + "</system>\n"
+#                     + messages[1]["content"]
+#                 )
+#                 messages = messages[1:]
+#                 input_prompt = hf_tokenizer.apply_chat_template(
+#                     messages, tokenize=False, add_generation_prompt=True
+#                 )
+#         except Exception:
+#             len_message = len(ori_message)
+#             for msgid in range(len_message):
+#                 input_prompt = (
+#                     input_prompt
+#                     + "<"
+#                     + ori_message[msgid]["role"]
+#                     + ">"
+#                     + ori_message[msgid]["content"]
+#                     + "</"
+#                     + ori_message[msgid]["role"]
+#                     + ">\n"
+#                 )
 
-    hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
-    messages.extend(history_messages)
-    messages.append({"role": "user", "content": prompt})
-    if hashing_kv is not None:
-        args_hash = compute_args_hash(model, messages)
-        if_cache_return = await hashing_kv.get_by_id(args_hash)
-        if if_cache_return is not None:
-            return if_cache_return["return"]
-
-    response = await ollama_client.chat(model=model, messages=messages, **kwargs)
-
-    result = response["message"]["content"]
-
-    if hashing_kv is not None:
-        await hashing_kv.upsert({args_hash: {"return": result, "model": model}})
-
-    return result
+#     input_ids = hf_tokenizer(
+#         input_prompt, return_tensors="pt", padding=True, truncation=True
+#     ).to("cuda")
+#     inputs = {k: v.to(hf_model.device) for k, v in input_ids.items()}
+#     output = hf_model.generate(
+#         **input_ids, max_new_tokens=512, num_return_sequences=1, early_stopping=True
+#     )
+#     response_text = hf_tokenizer.decode(
+#         output[0][len(inputs["input_ids"][0]) :], skip_special_tokens=True
+#     )
+#     if hashing_kv is not None:
+#         await hashing_kv.upsert({args_hash: {"return": response_text, "model": model}})
+#     return response_text
 
 
-@lru_cache(maxsize=1)
-def initialize_lmdeploy_pipeline(
-    model,
-    tp=1,
-    chat_template=None,
-    log_level="WARNING",
-    model_format="hf",
-    quant_policy=0,
-):
-    from lmdeploy import pipeline, ChatTemplateConfig, TurbomindEngineConfig
+# async def ollama_model_if_cache(
+#     model, prompt, system_prompt=None, history_messages=[], **kwargs
+# ) -> str:
+#     kwargs.pop("max_tokens", None)
+#     kwargs.pop("response_format", None)
+#     host = kwargs.pop("host", None)
+#     timeout = kwargs.pop("timeout", None)
 
-    lmdeploy_pipe = pipeline(
-        model_path=model,
-        backend_config=TurbomindEngineConfig(
-            tp=tp, model_format=model_format, quant_policy=quant_policy
-        ),
-        chat_template_config=ChatTemplateConfig(model_name=chat_template)
-        if chat_template
-        else None,
-        log_level="WARNING",
-    )
-    return lmdeploy_pipe
+#     ollama_client = ollama.AsyncClient(host=host, timeout=timeout)
+#     messages = []
+#     if system_prompt:
+#         messages.append({"role": "system", "content": system_prompt})
+
+#     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+#     messages.extend(history_messages)
+#     messages.append({"role": "user", "content": prompt})
+#     if hashing_kv is not None:
+#         args_hash = compute_args_hash(model, messages)
+#         if_cache_return = await hashing_kv.get_by_id(args_hash)
+#         if if_cache_return is not None:
+#             return if_cache_return["return"]
+
+#     response = await ollama_client.chat(model=model, messages=messages, **kwargs)
+
+#     result = response["message"]["content"]
+
+#     if hashing_kv is not None:
+#         await hashing_kv.upsert({args_hash: {"return": result, "model": model}})
+
+#     return result
 
 
-async def lmdeploy_model_if_cache(
-    model,
-    prompt,
-    system_prompt=None,
-    history_messages=[],
-    chat_template=None,
-    model_format="hf",
-    quant_policy=0,
-    **kwargs,
-) -> str:
-    """
-    Args:
-        model (str): The path to the model.
-            It could be one of the following options:
-                    - i) A local directory path of a turbomind model which is
-                        converted by `lmdeploy convert` command or download
-                        from ii) and iii).
-                    - ii) The model_id of a lmdeploy-quantized model hosted
-                        inside a model repo on huggingface.co, such as
-                        "InternLM/internlm-chat-20b-4bit",
-                        "lmdeploy/llama2-chat-70b-4bit", etc.
-                    - iii) The model_id of a model hosted inside a model repo
-                        on huggingface.co, such as "internlm/internlm-chat-7b",
-                        "Qwen/Qwen-7B-Chat ", "baichuan-inc/Baichuan2-7B-Chat"
-                        and so on.
-        chat_template (str): needed when model is a pytorch model on
-            huggingface.co, such as "internlm-chat-7b",
-            "Qwen-7B-Chat ", "Baichuan2-7B-Chat" and so on,
-            and when the model name of local path did not match the original model name in HF.
-        tp (int): tensor parallel
-        prompt (Union[str, List[str]]): input texts to be completed.
-        do_preprocess (bool): whether pre-process the messages. Default to
-            True, which means chat_template will be applied.
-        skip_special_tokens (bool): Whether or not to remove special tokens
-            in the decoding. Default to be True.
-        do_sample (bool): Whether or not to use sampling, use greedy decoding otherwise.
-            Default to be False, which means greedy decoding will be applied.
-    """
-    try:
-        import lmdeploy
-        from lmdeploy import version_info, GenerationConfig
-    except Exception:
-        raise ImportError("Please install lmdeploy before intialize lmdeploy backend.")
+# @lru_cache(maxsize=1)
+# def initialize_lmdeploy_pipeline(
+#     model,
+#     tp=1,
+#     chat_template=None,
+#     log_level="WARNING",
+#     model_format="hf",
+#     quant_policy=0,
+# ):
+#     from lmdeploy import pipeline, ChatTemplateConfig, TurbomindEngineConfig
 
-    kwargs.pop("response_format", None)
-    max_new_tokens = kwargs.pop("max_tokens", 512)
-    tp = kwargs.pop("tp", 1)
-    skip_special_tokens = kwargs.pop("skip_special_tokens", True)
-    do_preprocess = kwargs.pop("do_preprocess", True)
-    do_sample = kwargs.pop("do_sample", False)
-    gen_params = kwargs
+#     lmdeploy_pipe = pipeline(
+#         model_path=model,
+#         backend_config=TurbomindEngineConfig(
+#             tp=tp, model_format=model_format, quant_policy=quant_policy
+#         ),
+#         chat_template_config=ChatTemplateConfig(model_name=chat_template)
+#         if chat_template
+#         else None,
+#         log_level="WARNING",
+#     )
+#     return lmdeploy_pipe
 
-    version = version_info
-    if do_sample is not None and version < (0, 6, 0):
-        raise RuntimeError(
-            "`do_sample` parameter is not supported by lmdeploy until "
-            f"v0.6.0, but currently using lmdeloy {lmdeploy.__version__}"
-        )
-    else:
-        do_sample = True
-        gen_params.update(do_sample=do_sample)
 
-    lmdeploy_pipe = initialize_lmdeploy_pipeline(
-        model=model,
-        tp=tp,
-        chat_template=chat_template,
-        model_format=model_format,
-        quant_policy=quant_policy,
-        log_level="WARNING",
-    )
+# async def lmdeploy_model_if_cache(
+#     model,
+#     prompt,
+#     system_prompt=None,
+#     history_messages=[],
+#     chat_template=None,
+#     model_format="hf",
+#     quant_policy=0,
+#     **kwargs,
+# ) -> str:
+#     """
+#     Args:
+#         model (str): The path to the model.
+#             It could be one of the following options:
+#                     - i) A local directory path of a turbomind model which is
+#                         converted by `lmdeploy convert` command or download
+#                         from ii) and iii).
+#                     - ii) The model_id of a lmdeploy-quantized model hosted
+#                         inside a model repo on huggingface.co, such as
+#                         "InternLM/internlm-chat-20b-4bit",
+#                         "lmdeploy/llama2-chat-70b-4bit", etc.
+#                     - iii) The model_id of a model hosted inside a model repo
+#                         on huggingface.co, such as "internlm/internlm-chat-7b",
+#                         "Qwen/Qwen-7B-Chat ", "baichuan-inc/Baichuan2-7B-Chat"
+#                         and so on.
+#         chat_template (str): needed when model is a pytorch model on
+#             huggingface.co, such as "internlm-chat-7b",
+#             "Qwen-7B-Chat ", "Baichuan2-7B-Chat" and so on,
+#             and when the model name of local path did not match the original model name in HF.
+#         tp (int): tensor parallel
+#         prompt (Union[str, List[str]]): input texts to be completed.
+#         do_preprocess (bool): whether pre-process the messages. Default to
+#             True, which means chat_template will be applied.
+#         skip_special_tokens (bool): Whether or not to remove special tokens
+#             in the decoding. Default to be True.
+#         do_sample (bool): Whether or not to use sampling, use greedy decoding otherwise.
+#             Default to be False, which means greedy decoding will be applied.
+#     """
+#     try:
+#         import lmdeploy
+#         from lmdeploy import version_info, GenerationConfig
+#     except Exception:
+#         raise ImportError("Please install lmdeploy before intialize lmdeploy backend.")
 
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+#     kwargs.pop("response_format", None)
+#     max_new_tokens = kwargs.pop("max_tokens", 512)
+#     tp = kwargs.pop("tp", 1)
+#     skip_special_tokens = kwargs.pop("skip_special_tokens", True)
+#     do_preprocess = kwargs.pop("do_preprocess", True)
+#     do_sample = kwargs.pop("do_sample", False)
+#     gen_params = kwargs
 
-    hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
-    messages.extend(history_messages)
-    messages.append({"role": "user", "content": prompt})
-    if hashing_kv is not None:
-        args_hash = compute_args_hash(model, messages)
-        if_cache_return = await hashing_kv.get_by_id(args_hash)
-        if if_cache_return is not None:
-            return if_cache_return["return"]
+#     version = version_info
+#     if do_sample is not None and version < (0, 6, 0):
+#         raise RuntimeError(
+#             "`do_sample` parameter is not supported by lmdeploy until "
+#             f"v0.6.0, but currently using lmdeloy {lmdeploy.__version__}"
+#         )
+#     else:
+#         do_sample = True
+#         gen_params.update(do_sample=do_sample)
 
-    gen_config = GenerationConfig(
-        skip_special_tokens=skip_special_tokens,
-        max_new_tokens=max_new_tokens,
-        **gen_params,
-    )
+#     lmdeploy_pipe = initialize_lmdeploy_pipeline(
+#         model=model,
+#         tp=tp,
+#         chat_template=chat_template,
+#         model_format=model_format,
+#         quant_policy=quant_policy,
+#         log_level="WARNING",
+#     )
 
-    response = ""
-    async for res in lmdeploy_pipe.generate(
-        messages,
-        gen_config=gen_config,
-        do_preprocess=do_preprocess,
-        stream_response=False,
-        session_id=1,
-    ):
-        response += res.response
+#     messages = []
+#     if system_prompt:
+#         messages.append({"role": "system", "content": system_prompt})
 
-    if hashing_kv is not None:
-        await hashing_kv.upsert({args_hash: {"return": response, "model": model}})
-    return response
+#     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
+#     messages.extend(history_messages)
+#     messages.append({"role": "user", "content": prompt})
+#     if hashing_kv is not None:
+#         args_hash = compute_args_hash(model, messages)
+#         if_cache_return = await hashing_kv.get_by_id(args_hash)
+#         if if_cache_return is not None:
+#             return if_cache_return["return"]
+
+#     gen_config = GenerationConfig(
+#         skip_special_tokens=skip_special_tokens,
+#         max_new_tokens=max_new_tokens,
+#         **gen_params,
+#     )
+
+#     response = ""
+#     async for res in lmdeploy_pipe.generate(
+#         messages,
+#         gen_config=gen_config,
+#         do_preprocess=do_preprocess,
+#         stream_response=False,
+#         session_id=1,
+#     ):
+#         response += res.response
+
+#     if hashing_kv is not None:
+#         await hashing_kv.upsert({args_hash: {"return": response, "model": model}})
+#     return response
 
 
 async def gpt_4o_complete(
@@ -503,30 +503,30 @@ async def bedrock_complete(
     )
 
 
-async def hf_model_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
-) -> str:
-    model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
-    return await hf_model_if_cache(
-        model_name,
-        prompt,
-        system_prompt=system_prompt,
-        history_messages=history_messages,
-        **kwargs,
-    )
+# async def hf_model_complete(
+#     prompt, system_prompt=None, history_messages=[], **kwargs
+# ) -> str:
+#     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
+#     return await hf_model_if_cache(
+#         model_name,
+#         prompt,
+#         system_prompt=system_prompt,
+#         history_messages=history_messages,
+#         **kwargs,
+#     )
 
 
-async def ollama_model_complete(
-    prompt, system_prompt=None, history_messages=[], **kwargs
-) -> str:
-    model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
-    return await ollama_model_if_cache(
-        model_name,
-        prompt,
-        system_prompt=system_prompt,
-        history_messages=history_messages,
-        **kwargs,
-    )
+# async def ollama_model_complete(
+#     prompt, system_prompt=None, history_messages=[], **kwargs
+# ) -> str:
+#     model_name = kwargs["hashing_kv"].global_config["llm_model_name"]
+#     return await ollama_model_if_cache(
+#         model_name,
+#         prompt,
+#         system_prompt=system_prompt,
+#         history_messages=history_messages,
+#         **kwargs,
+#     )
 
 
 @wrap_embedding_func_with_attrs(embedding_dim=1536, max_token_size=8192)
@@ -582,42 +582,42 @@ async def azure_openai_embedding(
     return np.array([dp.embedding for dp in response.data])
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=60),
-    retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
-)
-async def siliconcloud_embedding(
-    texts: list[str],
-    model: str = "netease-youdao/bce-embedding-base_v1",
-    base_url: str = "https://api.siliconflow.cn/v1/embeddings",
-    max_token_size: int = 512,
-    api_key: str = None,
-) -> np.ndarray:
-    if api_key and not api_key.startswith("Bearer "):
-        api_key = "Bearer " + api_key
+# @retry(
+#     stop=stop_after_attempt(3),
+#     wait=wait_exponential(multiplier=1, min=4, max=60),
+#     retry=retry_if_exception_type((RateLimitError, APIConnectionError, Timeout)),
+# )
+# async def siliconcloud_embedding(
+#     texts: list[str],
+#     model: str = "netease-youdao/bce-embedding-base_v1",
+#     base_url: str = "https://api.siliconflow.cn/v1/embeddings",
+#     max_token_size: int = 512,
+#     api_key: str = None,
+# ) -> np.ndarray:
+#     if api_key and not api_key.startswith("Bearer "):
+#         api_key = "Bearer " + api_key
 
-    headers = {"Authorization": api_key, "Content-Type": "application/json"}
+#     headers = {"Authorization": api_key, "Content-Type": "application/json"}
 
-    truncate_texts = [text[0:max_token_size] for text in texts]
+#     truncate_texts = [text[0:max_token_size] for text in texts]
 
-    payload = {"model": model, "input": truncate_texts, "encoding_format": "base64"}
+#     payload = {"model": model, "input": truncate_texts, "encoding_format": "base64"}
 
-    base64_strings = []
-    async with aiohttp.ClientSession() as session:
-        async with session.post(base_url, headers=headers, json=payload) as response:
-            content = await response.json()
-            if "code" in content:
-                raise ValueError(content)
-            base64_strings = [item["embedding"] for item in content["data"]]
+#     base64_strings = []
+#     async with aiohttp.ClientSession() as session:
+#         async with session.post(base_url, headers=headers, json=payload) as response:
+#             content = await response.json()
+#             if "code" in content:
+#                 raise ValueError(content)
+#             base64_strings = [item["embedding"] for item in content["data"]]
 
-    embeddings = []
-    for string in base64_strings:
-        decode_bytes = base64.b64decode(string)
-        n = len(decode_bytes) // 4
-        float_array = struct.unpack("<" + "f" * n, decode_bytes)
-        embeddings.append(float_array)
-    return np.array(embeddings)
+#     embeddings = []
+#     for string in base64_strings:
+#         decode_bytes = base64.b64decode(string)
+#         n = len(decode_bytes) // 4
+#         float_array = struct.unpack("<" + "f" * n, decode_bytes)
+#         embeddings.append(float_array)
+#     return np.array(embeddings)
 
 
 # @wrap_embedding_func_with_attrs(embedding_dim=1024, max_token_size=8192)
@@ -692,28 +692,28 @@ async def bedrock_embedding(
         return np.array(embed_texts)
 
 
-async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
-    device = next(embed_model.parameters()).device
-    input_ids = tokenizer(
-        texts, return_tensors="pt", padding=True, truncation=True
-    ).input_ids.to(device)
-    with torch.no_grad():
-        outputs = embed_model(input_ids)
-        embeddings = outputs.last_hidden_state.mean(dim=1)
-    if embeddings.dtype == torch.bfloat16:
-        return embeddings.detach().to(torch.float32).cpu().numpy()
-    else:
-        return embeddings.detach().cpu().numpy()
+# async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
+#     device = next(embed_model.parameters()).device
+#     input_ids = tokenizer(
+#         texts, return_tensors="pt", padding=True, truncation=True
+#     ).input_ids.to(device)
+#     with torch.no_grad():
+#         outputs = embed_model(input_ids)
+#         embeddings = outputs.last_hidden_state.mean(dim=1)
+#     if embeddings.dtype == torch.bfloat16:
+#         return embeddings.detach().to(torch.float32).cpu().numpy()
+#     else:
+#         return embeddings.detach().cpu().numpy()
 
 
-async def ollama_embedding(texts: list[str], embed_model, **kwargs) -> np.ndarray:
-    embed_text = []
-    ollama_client = ollama.Client(**kwargs)
-    for text in texts:
-        data = ollama_client.embeddings(model=embed_model, prompt=text)
-        embed_text.append(data["embedding"])
+# async def ollama_embedding(texts: list[str], embed_model, **kwargs) -> np.ndarray:
+#     embed_text = []
+#     ollama_client = ollama.Client(**kwargs)
+#     for text in texts:
+#         data = ollama_client.embeddings(model=embed_model, prompt=text)
+#         embed_text.append(data["embedding"])
 
-    return embed_text
+#     return embed_text
 
 
 class Model(BaseModel):

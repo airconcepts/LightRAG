@@ -10,7 +10,6 @@ from .llm import (
     openai_embedding,
 )
 from .operate import (
-    chunking_by_token_size,
     chunking_markdown,
     extract_entities,
     local_query,
@@ -41,9 +40,9 @@ from .storage import (
     NetworkXStorage,
 )
 
-from .kg.neo4j_impl import Neo4JStorage
+# from .kg.neo4j_impl import Neo4JStorage
 
-from .kg.oracle_impl import OracleKVStorage, OracleGraphStorage, OracleVectorDBStorage
+# from .kg.oracle_impl import OracleKVStorage, OracleGraphStorage, OracleVectorDBStorage
 
 # future KG integrations
 
@@ -212,14 +211,14 @@ class LightRAG:
         return {
             # kv storage
             "JsonKVStorage": JsonKVStorage,
-            "OracleKVStorage": OracleKVStorage,
+            # "OracleKVStorage": OracleKVStorage,
             # vector storage
             "NanoVectorDBStorage": NanoVectorDBStorage,
-            "OracleVectorDBStorage": OracleVectorDBStorage,
+            # "OracleVectorDBStorage": OracleVectorDBStorage,
             # graph storage
             "NetworkXStorage": NetworkXStorage,
-            "Neo4JStorage": Neo4JStorage,
-            "OracleGraphStorage": OracleGraphStorage,
+            # "Neo4JStorage": Neo4JStorage,
+            # "OracleGraphStorage": OracleGraphStorage,
             # "ArangoDBStorage": ArangoDBStorage
         }
 
