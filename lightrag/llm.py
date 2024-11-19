@@ -24,7 +24,7 @@ from tenacity import (
     wait_exponential,
     retry_if_exception_type,
 )
-from transformers import AutoTokenizer, AutoModelForCausalLM
+# from transformers import AutoTokenizer, AutoModelForCausalLM
 # import torch
 from pydantic import BaseModel, Field
 from typing import List, Dict, Callable, Any
