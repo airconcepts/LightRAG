@@ -2,6 +2,8 @@ import asyncio
 import json
 import re
 from typing import Union, TypedDict, List, Optional
+from tqdm.asyncio import tqdm as tqdm_async
+from typing import Union
 from collections import Counter, defaultdict
 import warnings
 from llama_index.core.node_parser.interface import Document
@@ -358,11 +360,15 @@ async def extract_entities(
         )
         return dict(maybe_nodes), dict(maybe_edges)
 
-    # use_llm_func is wrapped in ascynio.Semaphore, limiting max_async callings
-    results = await asyncio.gather(
-        *[_process_single_content(c) for c in ordered_chunks]
-    )
-    print()  # clear the progress bar
+    results = []
+    for result in tqdm_async(
+        asyncio.as_completed([_process_single_content(c) for c in ordered_chunks]),
+        total=len(ordered_chunks),
+        desc="Extracting entities from chunks",
+        unit="chunk",
+    ):
+        results.append(await result)
+
     maybe_nodes = defaultdict(list)
     maybe_edges = defaultdict(list)
     for m_nodes, m_edges in results:
@@ -370,18 +376,38 @@ async def extract_entities(
             maybe_nodes[k].extend(v)
         for k, v in m_edges.items():
             maybe_edges[tuple(sorted(k))].extend(v)
-    all_entities_data = await asyncio.gather(
-        *[
-            _merge_nodes_then_upsert(k, v, knowledge_graph_inst, global_config)
-            for k, v in maybe_nodes.items()
-        ]
-    )
-    all_relationships_data = await asyncio.gather(
-        *[
-            _merge_edges_then_upsert(k[0], k[1], v, knowledge_graph_inst, global_config)
-            for k, v in maybe_edges.items()
-        ]
-    )
+    logger.info("Inserting entities into storage...")
+    all_entities_data = []
+    for result in tqdm_async(
+        asyncio.as_completed(
+            [
+                _merge_nodes_then_upsert(k, v, knowledge_graph_inst, global_config)
+                for k, v in maybe_nodes.items()
+            ]
+        ),
+        total=len(maybe_nodes),
+        desc="Inserting entities",
+        unit="entity",
+    ):
+        all_entities_data.append(await result)
+
+    logger.info("Inserting relationships into storage...")
+    all_relationships_data = []
+    for result in tqdm_async(
+        asyncio.as_completed(
+            [
+                _merge_edges_then_upsert(
+                    k[0], k[1], v, knowledge_graph_inst, global_config
+                )
+                for k, v in maybe_edges.items()
+            ]
+        ),
+        total=len(maybe_edges),
+        desc="Inserting relationships",
+        unit="relationship",
+    ):
+        all_relationships_data.append(await result)
+
     if not len(all_entities_data):
         logger.warning("Didn't extract any entities, maybe your LLM is not working")
         return None
@@ -472,7 +498,7 @@ async def local_query(
                 .replace("model", "")
                 .strip()
             )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
+            result = "{" + result.split("{")[-1].split("}")[0] + "}"
 
             keywords_data = json.loads(result)
             keywords = keywords_data.get("low_level_keywords", [])
@@ -598,24 +624,20 @@ async def _find_most_related_text_unit_from_entities(
     all_text_units_lookup = {}
     for index, (this_text_units, this_edges) in enumerate(zip(text_units, edges)):
         for c_id in this_text_units:
-            if c_id in all_text_units_lookup:
-                continue
-            relation_counts = 0
-            if this_edges:  # Add check for None edges
+            if c_id not in all_text_units_lookup:
+                all_text_units_lookup[c_id] = {
+                    "data": await text_chunks_db.get_by_id(c_id),
+                    "order": index,
+                    "relation_counts": 0,
+                }
+
+            if this_edges:
                 for e in this_edges:
                     if (
                         e[1] in all_one_hop_text_units_lookup
                         and c_id in all_one_hop_text_units_lookup[e[1]]
                     ):
-                        relation_counts += 1
-
-            chunk_data = await text_chunks_db.get_by_id(c_id)
-            if chunk_data is not None and "content" in chunk_data:  # Add content check
-                all_text_units_lookup[c_id] = {
-                    "data": chunk_data,
-                    "order": index,
-                    "relation_counts": relation_counts,
-                }
+                        all_text_units_lookup[c_id]["relation_counts"] += 1
 
     # Filter out None values and ensure data has content
     all_text_units = [
@@ -711,7 +733,7 @@ async def global_query(
                 .replace("model", "")
                 .strip()
             )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
+            result = "{" + result.split("{")[-1].split("}")[0] + "}"
 
             keywords_data = json.loads(result)
             keywords = keywords_data.get("high_level_keywords", [])
@@ -921,7 +943,7 @@ async def hybrid_query(
                 .replace("model", "")
                 .strip()
             )
-            result = "{" + result.split("{")[1].split("}")[0] + "}"
+            result = "{" + result.split("{")[-1].split("}")[0] + "}"
             keywords_data = json.loads(result)
             hl_keywords = keywords_data.get("high_level_keywords", [])
             ll_keywords = keywords_data.get("low_level_keywords", [])
