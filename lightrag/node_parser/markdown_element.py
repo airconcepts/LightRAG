@@ -11,10 +11,15 @@ from lightrag.utils import logger
 from llama_index.embeddings.openai import OpenAIEmbedding
 import re
 from llama_index.core.settings import Settings
+from llama_index.llms.openai import OpenAI
 BUFFER_SIZE = 2
 
+Settings.llm = OpenAI(model="gpt-4o-mini", temperature=0)
+
 def regex_splitter(text: str):
-    return text.split('\n')
+    lines = text.split('\n')
+    trimmed_lines = [line.strip() for line in lines if line.strip()]
+    return trimmed_lines
 
 class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
     """Markdown element node parser.
@@ -41,10 +46,12 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
 
         node_parser = self.nested_node_parser or SemanticSplitterNodeParser.from_defaults(
           sentence_splitter=regex_splitter,
-          buffer_size=4,
+          buffer_size=6,
+          breakpoint_percentile_threshold=98,
           include_prev_next_rel=True,
           include_metadata=True,
         )
+       
 
         nodes: List[BaseNode] = []
         cur_text_el_buffer: List[str] = []
@@ -323,24 +330,24 @@ class AirMarkdownElementNodeParser(MarkdownElementNodeParser):
                     )
             else:
                 element.id = f"id_{node_id}_{idx}" if node_id else f"id_{idx}"
-                # # if the element is not a table, keep it as to text
-                # elements[idx] = Element(
-                #     id=f"id_{node_id}_{idx}" if node_id else f"id_{idx}",
-                #     type="text",
-                #     element=element.element,
-                # )
+                # if the element is not a table, keep it as to text
+                elements[idx] = Element(
+                    id=f"id_{node_id}_{idx}" if node_id else f"id_{idx}",
+                    type="text",
+                    element= element.element,
+                )
 
         # merge consecutive text elements together for now
-        # merged_elements: List[Element] = []
-        # for element in elements:
-        #     if (
-        #         len(merged_elements) > 0
-        #         and element.type == "text"
-        #         and merged_elements[-1].type == "text"
-        #     ):
-        #         merged_elements[-1].element += "\n" + element.element
-        #     else:
-        #         merged_elements.append(element)
-        # elements = merged_elements
-        # return merged_elements
-        return elements
+        merged_elements: List[Element] = []
+        for element in elements:
+            if (
+                len(merged_elements) > 0
+                and element.type == "text"
+                and merged_elements[-1].type == "text"
+            ):
+                merged_elements[-1].element += "\n" + element.element
+            else:
+                merged_elements.append(element)
+        elements = merged_elements
+        return merged_elements
+        # return elements
