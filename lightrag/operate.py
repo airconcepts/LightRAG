@@ -49,8 +49,8 @@ def chunking_markdown(
     for index, node in enumerate(nodes):
         title_hierarchy = node.metadata.get("title_hierarchy", [])
         node_content = f"""
-Breadcrumb: {"->".join(title_hierarchy)}
-{node.get_content()}
+Breadcrumb: {"->".join(title_hierarchy)}\n
+{node.get_content()}\n
 """
         results.append(dict(
             tokens=len(encode_string_by_tiktoken(node_content, model_name=tiktoken_model)),
